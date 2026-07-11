@@ -10,12 +10,15 @@ import winreg
 import tempfile
 import urllib.request
 import urllib.error
+import pystray
+from pystray import MenuItem as item
+from PIL import Image, ImageDraw
 from ctypes import wintypes
 from dataclasses import dataclass
 from pathlib import Path
 from tkinter import messagebox, ttk
 
-CURRENT_VERSION = "v1.0.2"
+CURRENT_VERSION = "v1.0.3"
 GITHUB_OWNER = "chinhtran13"
 GITHUB_REPO = "TBH_Tool"
 
@@ -497,6 +500,7 @@ class App:
         self.log_text = None
         self.status_var = tk.StringVar(value="Đang chờ cấu hình.")
 
+        self.root.protocol("WM_DELETE_WINDOW", self.quit_app)
         self.build_ui()
         self.load_config()
         self.log("Sẵn sàng. Chọn 2 vùng, điểm click hành động và danh sách vị trí túi.")
@@ -506,6 +510,98 @@ class App:
 
 
     def build_ui(self):
+        # Header / Toolbar frame
+        self.header_frame = tk.Frame(self.root, bg="#2d3748", height=38)
+        self.header_frame.pack(side="top", fill="x")
+        
+        # Left side title/status
+        self.title_label = tk.Label(
+            self.header_frame, 
+            text="🎒 TBH Tool", 
+            fg="#4fd1c5", 
+            bg="#2d3748", 
+            font=("Segoe UI", 10, "bold")
+        )
+        self.title_label.pack(side="left", padx=10)
+
+        # Right side toolbar
+        self.toolbar_frame = tk.Frame(self.header_frame, bg="#2d3748")
+        self.toolbar_frame.pack(side="right", padx=5)
+
+        # Minimize to system tray button
+        self.tray_button = tk.Button(
+            self.toolbar_frame,
+            text="🖥️ Thu nhỏ khay",
+            fg="white",
+            bg="#4a5568",
+            activeforeground="white",
+            activebackground="#2d3748",
+            relief="flat",
+            font=("Segoe UI", 9),
+            command=self.minimize_to_tray,
+            padx=6,
+            pady=2,
+            cursor="hand2"
+        )
+        self.tray_button.pack(side="right", padx=3)
+
+        # Update button (minimized arrow icon, hidden initially)
+        self.update_icon_button = tk.Button(
+            self.toolbar_frame,
+            text="⬇️ Cập nhật",
+            fg="white",
+            bg="#e53e3e",
+            activeforeground="white",
+            activebackground="#c53030",
+            relief="flat",
+            font=("Segoe UI", 9, "bold"),
+            command=self.expand_update_banner,
+            padx=6,
+            pady=2,
+            cursor="hand2"
+        )
+        # Hidden initially
+
+        # Update banner frame (hidden initially)
+        self.update_banner = tk.Frame(self.header_frame, bg="#e53e3e")
+        
+        self.update_banner_label = tk.Label(
+            self.update_banner,
+            text="Có bản mới!",
+            fg="white",
+            bg="#e53e3e",
+            font=("Segoe UI", 9, "bold")
+        )
+        self.update_banner_label.pack(side="left", padx=8, pady=3)
+        
+        self.update_banner_action = tk.Button(
+            self.update_banner,
+            text="Tải ngay",
+            fg="black",
+            bg="white",
+            relief="flat",
+            font=("Segoe UI", 8, "bold"),
+            command=self.trigger_update_download,
+            padx=6,
+            cursor="hand2"
+        )
+        self.update_banner_action.pack(side="left", padx=5, pady=2)
+        
+        self.update_banner_minimize = tk.Button(
+            self.update_banner,
+            text="➖",
+            fg="white",
+            bg="#e53e3e",
+            activeforeground="white",
+            activebackground="#c53030",
+            relief="flat",
+            font=("Segoe UI", 8, "bold"),
+            command=self.minimize_update_banner,
+            padx=6,
+            cursor="hand2"
+        )
+        self.update_banner_minimize.pack(side="left", padx=(0, 5), pady=2)
+
         # Scrollable container
         scroll_container = ttk.Frame(self.root)
         scroll_container.pack(fill="both", expand=True)
@@ -1306,104 +1402,71 @@ class App:
                     download_url = assets[0].get("browser_download_url")
                 
                 if download_url:
-                    # Gửi tín hiệu về luồng chính để hiển thị hộp thoại Tkinter
-                    self.root.after(0, self.prompt_update, tag_name, download_url)
+                    # Gửi tín hiệu về luồng chính để hiển thị thanh thông báo cập nhật
+                    self.root.after(0, self.show_update_notification, tag_name, download_url)
         except Exception as e:
             print(f"[Updater] Lỗi kiểm tra cập nhật: {e}")
 
-    def prompt_update(self, new_version, download_url):
-        """Hiển thị thông báo cập nhật dạng popup không chặn ở góc phải màn hình."""
-        toast = tk.Toplevel(self.root)
-        toast.withdraw()  # Ẩn đi để tính toán vị trí tránh nhấp nháy
-        toast.overrideredirect(True)  # Không có viền cửa sổ chuẩn
-        toast.attributes("-topmost", True)
-        toast.configure(bg="#2d3748")  # Màu nền tối hiện đại
-
-        # Giao diện thông báo
-        frame = tk.Frame(toast, bg="#2d3748", bd=1, relief="solid", highlightthickness=0)
-        frame.pack(fill="both", expand=True)
-
-        # Tiêu đề
-        title_label = tk.Label(
-            frame, 
-            text="🚀 Có bản cập nhật mới!", 
-            fg="#4fd1c5",  # Teal color
-            bg="#2d3748", 
-            font=("Segoe UI", 10, "bold")
-        )
-        title_label.pack(pady=(10, 2), padx=15, anchor="w")
-
-        # Nội dung chi tiết
-        desc_label = tk.Label(
-            frame, 
-            text=f"Phiên bản {new_version} đã sẵn sàng.\nClick vào đây để cài đặt tự động.", 
-            fg="#e2e8f0", 
-            bg="#2d3748", 
-            font=("Segoe UI", 9),
-            justify="left"
-        )
-        desc_label.pack(pady=(0, 10), padx=15, anchor="w")
-
-        # Nút đóng nhỏ ở góc
-        close_btn = tk.Label(
-            frame, 
-            text="✕", 
-            fg="#a0aec0", 
-            bg="#2d3748", 
-            font=("Segoe UI", 9, "bold"),
-            cursor="hand2"
-        )
-        close_btn.place(x=278, y=4)
+    def minimize_to_tray(self):
+        """Ẩn cửa sổ chính và hiển thị icon dưới khay hệ thống (System Tray)."""
+        self.root.withdraw()
         
-        # Đổi màu nút đóng khi di chuột vào
-        close_btn.bind("<Enter>", lambda _: close_btn.config(fg="#fc8181"))
-        close_btn.bind("<Leave>", lambda _: close_btn.config(fg="#a0aec0"))
-        close_btn.bind("<Button-1>", lambda _: toast.destroy())
-
-        # Hiệu ứng đổi màu nền khi hover vào vùng thông báo để click
-        def on_enter(e):
-            frame.config(bg="#3a4a5e")
-            title_label.config(bg="#3a4a5e")
-            desc_label.config(bg="#3a4a5e")
-            close_btn.config(bg="#3a4a5e")
-
-        def on_leave(e):
-            frame.config(bg="#2d3748")
-            title_label.config(bg="#2d3748")
-            desc_label.config(bg="#2d3748")
-            close_btn.config(bg="#2d3748")
-
-        for widget in (frame, title_label, desc_label):
-            widget.bind("<Enter>", on_enter)
-            widget.bind("<Leave>", on_leave)
-
-        # Sự kiện khi nhấp chuột để bắt đầu tải cập nhật
-        def on_click(event):
-            toast.destroy()
-            if messagebox.askyesno("Xác nhận cập nhật", f"Bạn có muốn tải xuống và cài đặt tự động phiên bản {new_version} không?", parent=self.root):
-                self.download_update(download_url, new_version)
-
-        frame.bind("<Button-1>", on_click)
-        title_label.bind("<Button-1>", on_click)
-        desc_label.bind("<Button-1>", on_click)
-
-        # Tính toán vị trí ở góc dưới bên phải màn hình chính
-        toast.update_idletasks()
-        width = 300
-        height = 75
+        # Vẽ một icon mặc định bằng PIL (độ phân giải 64x64)
+        image = Image.new('RGB', (64, 64), color=(79, 209, 197))
+        d = ImageDraw.Draw(image)
+        d.rectangle([(16, 16), (48, 48)], fill=(45, 55, 72))
+        d.text((24, 20), "T", fill=(255, 255, 255))
         
-        screen_w = self.root.winfo_screenwidth()
-        screen_h = self.root.winfo_screenheight()
-        
-        # Đặt cách lề phải 20px, lề dưới 60px (để tránh che taskbar)
-        x = screen_w - width - 20
-        y = screen_h - height - 60
-        
-        toast.geometry(f"{width}x{height}+{x}+{y}")
-        toast.deiconify()
+        def on_tray_click(icon, item):
+            if str(item) == "Mở":
+                icon.stop()
+                self.root.after(0, self.root.deiconify)
+            elif str(item) == "Thoát":
+                icon.stop()
+                self.root.after(0, self.quit_app)
 
-        # Tự động tắt thông báo sau 15 giây nếu không tương tác
-        self.root.after(15000, lambda: toast.destroy() if toast.winfo_exists() else None)
+        menu = (item('Mở', on_tray_click), item('Thoát', on_tray_click))
+        self.tray_icon = pystray.Icon("TBH_Tool", image, "TBH Tool", menu)
+        
+        # Chạy luồng ngầm để pystray không chặn tiến trình chính Tkinter
+        threading.Thread(target=self.tray_icon.run, daemon=True).start()
+
+    def quit_app(self):
+        """Thoát ứng dụng sạch sẽ, dọn dẹp tray icon."""
+        if hasattr(self, "tray_icon"):
+            try:
+                self.tray_icon.stop()
+            except Exception:
+                pass
+        self.root.destroy()
+        sys.exit(0)
+
+    def show_update_notification(self, new_version, download_url):
+        """Hiển thị thanh thông báo cập nhật màu đỏ nổi bật ở đầu ứng dụng."""
+        self.latest_version = new_version
+        self.latest_download_url = download_url
+        
+        self.update_banner_label.config(text=f"🚀 Có bản mới {new_version}!")
+        self.update_banner.pack(side="left", padx=10)
+
+    def minimize_update_banner(self):
+        """Thu nhỏ thanh thông báo cập nhật thành icon nút bấm kế bên nút Khay hệ thống."""
+        self.update_banner.pack_forget()
+        self.update_icon_button.pack(side="right", padx=3)
+
+    def expand_update_banner(self):
+        """Mở rộng lại thanh thông báo cập nhật từ icon nút bấm."""
+        self.update_icon_button.pack_forget()
+        self.update_banner.pack(side="left", padx=10)
+
+    def trigger_update_download(self):
+        """Kích hoạt hộp thoại tải xuống bản cập nhật mới."""
+        if messagebox.askyesno(
+            "Xác nhận cập nhật",
+            f"Bạn có muốn tải xuống và cài đặt tự động phiên bản {self.latest_version} không?",
+            parent=self.root
+        ):
+            self.download_update(self.latest_download_url, self.latest_version)
 
 
     def download_update(self, download_url, new_version):
