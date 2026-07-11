@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from tkinter import messagebox, ttk
 
-CURRENT_VERSION = "v1.0.4"
+CURRENT_VERSION = "v1.0.2"
 GITHUB_OWNER = "chinhtran13"
 GITHUB_REPO = "TBH_Tool"
 
@@ -508,99 +508,14 @@ class App:
         # Chạy luồng ngầm kiểm tra cập nhật tự động
         threading.Thread(target=self.check_for_updates, daemon=True).start()
 
+        # Kiểm tra nếu vừa cập nhật ứng dụng thành công
+        if "--updated" in sys.argv:
+            self.root.after(1000, self.show_changelog_dialog)
+
 
     def build_ui(self):
-        # Header / Toolbar frame
-        self.header_frame = tk.Frame(self.root, bg="#2d3748", height=38)
-        self.header_frame.pack(side="top", fill="x")
-        
-        # Left side title/status
-        self.title_label = tk.Label(
-            self.header_frame, 
-            text="🎒 TBH Tool", 
-            fg="#4fd1c5", 
-            bg="#2d3748", 
-            font=("Segoe UI", 10, "bold")
-        )
-        self.title_label.pack(side="left", padx=10)
-
-        # Right side toolbar
-        self.toolbar_frame = tk.Frame(self.header_frame, bg="#2d3748")
-        self.toolbar_frame.pack(side="right", padx=5)
-
-        # Minimize to system tray button
-        self.tray_button = tk.Button(
-            self.toolbar_frame,
-            text="🖥️ Thu nhỏ khay",
-            fg="white",
-            bg="#4a5568",
-            activeforeground="white",
-            activebackground="#2d3748",
-            relief="flat",
-            font=("Segoe UI", 9),
-            command=self.minimize_to_tray,
-            padx=6,
-            pady=2,
-            cursor="hand2"
-        )
-        self.tray_button.pack(side="right", padx=3)
-
-        # Update button (minimized arrow icon, hidden initially)
-        self.update_icon_button = tk.Button(
-            self.toolbar_frame,
-            text="⬇️ Cập nhật",
-            fg="white",
-            bg="#e53e3e",
-            activeforeground="white",
-            activebackground="#c53030",
-            relief="flat",
-            font=("Segoe UI", 9, "bold"),
-            command=self.expand_update_banner,
-            padx=6,
-            pady=2,
-            cursor="hand2"
-        )
-        # Hidden initially
-
-        # Update banner frame (hidden initially)
-        self.update_banner = tk.Frame(self.header_frame, bg="#e53e3e")
-        
-        self.update_banner_label = tk.Label(
-            self.update_banner,
-            text="Có bản mới!",
-            fg="white",
-            bg="#e53e3e",
-            font=("Segoe UI", 9, "bold")
-        )
-        self.update_banner_label.pack(side="left", padx=8, pady=3)
-        
-        self.update_banner_action = tk.Button(
-            self.update_banner,
-            text="Tải ngay",
-            fg="black",
-            bg="white",
-            relief="flat",
-            font=("Segoe UI", 8, "bold"),
-            command=self.trigger_update_download,
-            padx=6,
-            cursor="hand2"
-        )
-        self.update_banner_action.pack(side="left", padx=5, pady=2)
-        
-        self.update_banner_minimize = tk.Button(
-            self.update_banner,
-            text="➖",
-            fg="white",
-            bg="#e53e3e",
-            activeforeground="white",
-            activebackground="#c53030",
-            relief="flat",
-            font=("Segoe UI", 8, "bold"),
-            command=self.minimize_update_banner,
-            padx=6,
-            cursor="hand2"
-        )
-        self.update_banner_minimize.pack(side="left", padx=(0, 5), pady=2)
+        # Đăng ký sự kiện thay đổi cấu hình cửa sổ để phát hiện Thu nhỏ (Minimize)
+        self.root.bind("<Configure>", self.on_state_change)
 
         # Scrollable container
         scroll_container = ttk.Frame(self.root)
@@ -637,6 +552,21 @@ class App:
 
         canvas.bind("<Enter>", bind_mousewheel)
         canvas.bind("<Leave>", unbind_mousewheel)
+
+        # Nút thông báo cập nhật (ẩn mặc định, sẽ hiển thị ở trên đầu khi có bản mới)
+        self.update_btn = tk.Button(
+            outer,
+            text="",
+            fg="white",
+            bg="#e53e3e",
+            activeforeground="white",
+            activebackground="#c53030",
+            relief="flat",
+            font=("Segoe UI", 10, "bold"),
+            command=self.trigger_update_download,
+            pady=6,
+            cursor="hand2"
+        )
 
         section1 = ttk.LabelFrame(outer, text="Vùng 1 - Điều kiện thay đổi")
         section1.pack(fill="x", pady=4)
@@ -1407,6 +1337,12 @@ class App:
         except Exception as e:
             print(f"[Updater] Lỗi kiểm tra cập nhật: {e}")
 
+    def on_state_change(self, event=None):
+        """Phát hiện khi người dùng nhấn nút thu nhỏ tiêu chuẩn (Minimize) của Windows."""
+        if event and event.widget == self.root:
+            if self.root.state() == "iconic":
+                self.minimize_to_tray()
+
     def minimize_to_tray(self):
         """Ẩn cửa sổ chính và hiển thị icon dưới khay hệ thống (System Tray)."""
         self.root.withdraw()
@@ -1417,10 +1353,15 @@ class App:
         d.rectangle([(16, 16), (48, 48)], fill=(45, 55, 72))
         d.text((24, 20), "T", fill=(255, 255, 255))
         
+        # Nếu có bản cập nhật mới, vẽ thêm một chấm đỏ chứa mũi tên đi xuống ở góc icon khay hệ thống
+        if hasattr(self, "latest_version"):
+            d.ellipse([(38, 38), (62, 62)], fill=(229, 62, 62))  # Chấm đỏ thông báo
+            d.polygon([(50, 56), (44, 48), (56, 48)], fill=(255, 255, 255))  # Mũi tên chỉ xuống màu trắng
+        
         def on_tray_click(icon, item):
             if str(item) == "Mở":
                 icon.stop()
-                self.root.after(0, self.root.deiconify)
+                self.root.after(0, self.restore_from_tray)
             elif str(item) == "Thoát":
                 icon.stop()
                 self.root.after(0, self.quit_app)
@@ -1430,6 +1371,11 @@ class App:
         
         # Chạy luồng ngầm để pystray không chặn tiến trình chính Tkinter
         threading.Thread(target=self.tray_icon.run, daemon=True).start()
+
+    def restore_from_tray(self):
+        """Khôi phục lại ứng dụng từ khay hệ thống."""
+        self.root.deiconify()
+        self.root.state("normal")
 
     def quit_app(self):
         """Thoát ứng dụng sạch sẽ, dọn dẹp tray icon."""
@@ -1442,22 +1388,12 @@ class App:
         sys.exit(0)
 
     def show_update_notification(self, new_version, download_url):
-        """Hiển thị thanh thông báo cập nhật màu đỏ nổi bật ở đầu ứng dụng."""
+        """Hiển thị nút thông báo cập nhật màu đỏ ngay trên đầu giao diện chính (không tạo thêm hàng phụ)."""
         self.latest_version = new_version
         self.latest_download_url = download_url
         
-        self.update_banner_label.config(text=f"🚀 Có bản mới {new_version}!")
-        self.update_banner.pack(side="left", padx=10)
-
-    def minimize_update_banner(self):
-        """Thu nhỏ thanh thông báo cập nhật thành icon nút bấm kế bên nút Khay hệ thống."""
-        self.update_banner.pack_forget()
-        self.update_icon_button.pack(side="right", padx=3)
-
-    def expand_update_banner(self):
-        """Mở rộng lại thanh thông báo cập nhật từ icon nút bấm."""
-        self.update_icon_button.pack_forget()
-        self.update_banner.pack(side="left", padx=10)
+        self.update_btn.config(text=f"🚀 Phát hiện phiên bản mới: {new_version}! Click vào đây để cập nhật tự động")
+        self.update_btn.pack(side="top", fill="x", pady=(0, 10))
 
     def trigger_update_download(self):
         """Kích hoạt hộp thoại tải xuống bản cập nhật mới."""
@@ -1467,6 +1403,92 @@ class App:
             parent=self.root
         ):
             self.download_update(self.latest_download_url, self.latest_version)
+
+    def show_changelog_dialog(self):
+        """Khởi chạy luồng lấy thông tin thay đổi từ GitHub và hiển thị hộp thoại."""
+        threading.Thread(target=self.fetch_changelog_and_show, daemon=True).start()
+
+    def fetch_changelog_and_show(self):
+        """Tải mô tả chi tiết của bản phát hành mới nhất từ GitHub Releases."""
+        url = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
+        changelog = "Không thể tải thông tin cập nhật chi tiết."
+        tag_name = CURRENT_VERSION
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={"User-Agent": "TBH_Tool-Updater"}
+            )
+            with urllib.request.urlopen(req, timeout=10) as response:
+                data = json.loads(response.read().decode("utf-8"))
+            tag_name = data.get("tag_name", CURRENT_VERSION)
+            changelog = data.get("body", "Không có mô tả chi tiết cho bản cập nhật này.")
+        except Exception as e:
+            print(f"[Changelog] Lỗi tải thông tin: {e}")
+            changelog = f"Đã cập nhật thành công lên phiên bản {CURRENT_VERSION}!"
+
+        # Hiển thị trên luồng chính Tkinter
+        self.root.after(0, self.display_changelog_win, tag_name, changelog)
+
+    def display_changelog_win(self, tag_name, changelog):
+        """Mở cửa sổ hiển thị mô tả bản cập nhật mới."""
+        win = tk.Toplevel(self.root)
+        win.title("🎉 Cập nhật thành công!")
+        win.geometry("500x400")
+        win.transient(self.root)
+        win.grab_set()
+
+        # Căn giữa cửa sổ con so với cửa sổ chính
+        win.update_idletasks()
+        rx = self.root.winfo_x()
+        ry = self.root.winfo_y()
+        rw = self.root.winfo_width()
+        rh = self.root.winfo_height()
+        w = win.winfo_width()
+        h = win.winfo_height()
+        x = rx + (rw - w) // 2
+        y = ry + (rh - h) // 2
+        win.geometry(f"+{x}+{y}")
+
+        # Giao diện hiển thị
+        frame = ttk.Frame(win, padding=15)
+        frame.pack(fill="both", expand=True)
+
+        header = ttk.Label(
+            frame, 
+            text=f"Chúc mừng! Bạn đã cập nhật lên {tag_name}", 
+            font=("Segoe UI", 12, "bold"),
+            foreground="#2b6cb0"
+        )
+        header.pack(anchor="w", pady=(0, 10))
+
+        desc = ttk.Label(
+            frame, 
+            text="Tính năng và thay đổi mới:", 
+            font=("Segoe UI", 10, "bold")
+        )
+        desc.pack(anchor="w", pady=(0, 5))
+
+        # Khung văn bản cuộn
+        text_area = tk.Text(
+            frame, 
+            wrap="word", 
+            font=("Segoe UI", 9), 
+            bg="#f7fafc", 
+            padx=10, 
+            pady=10,
+            relief="solid",
+            bd=1
+        )
+        text_area.insert("1.0", changelog)
+        text_area.config(state="disabled")
+        text_area.pack(fill="both", expand=True, pady=(0, 10))
+
+        scrollbar = ttk.Scrollbar(text_area, command=text_area.yview)
+        text_area.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+
+        btn_close = ttk.Button(frame, text="Đã hiểu", command=win.destroy)
+        btn_close.pack(anchor="center")
 
 
     def download_update(self, download_url, new_version):
@@ -1570,7 +1592,7 @@ if errorlevel 1 (
     goto loop
 )
 del "{temp_file}" > NUL
-start "" "{current_exe}"
+start "" "{current_exe}" --updated
 del "%~f0"
 """
             bat_path.write_text(bat_content, encoding="utf-8")
