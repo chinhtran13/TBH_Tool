@@ -1,0 +1,19 @@
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# PyInstaller build directories and specs (optional, but keep build/dist ignored)
+build/
+dist/
+*.spec
+
+# Application runtime generated files
+captures/
+profiles/
+inventory_bag_monitor_config.json
+
+# Temporary updater files
+update_new.exe
+update.bat
