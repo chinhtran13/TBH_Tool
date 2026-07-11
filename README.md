@@ -1,4 +1,4 @@
-# Theo dõi túi đồ
+# Theo dõi túi đồ (TBH_Tool)
 
 Tool Python này theo dõi 2 vùng màn hình và tự động click theo luồng:
 
@@ -7,7 +7,16 @@ Tool Python này theo dõi 2 vùng màn hình và tự động click theo luồn
 3. Khi vừa đổi túi mà đồ ở Vùng 1 vẫn còn, tool sẽ quét lại Vùng 1 và click tiếp thay vì bỏ qua.
 4. Tiếp tục lặp lại cho đến hết các túi bạn đã cấu hình.
 
-## Chạy tool
+## 🚀 Tải và chạy nhanh bản .exe (Không cần cài Python)
+
+Để sử dụng phần mềm mà không cần cài đặt Python, bạn chỉ cần tải file chạy sẵn `.exe` từ mục **Releases** của GitHub:
+1. Nhìn sang cột bên phải trang GitHub này, tìm mục **Releases**.
+2. Chọn phiên bản mới nhất (ví dụ: `v1.0.0`) và bấm tải file **`TBH_Tool.exe`** trong mục **Assets**.
+3. Chạy trực tiếp file `TBH_Tool.exe` vừa tải về.
+
+## 💻 Cách chạy từ mã nguồn Python
+
+Nếu bạn muốn chạy hoặc chỉnh sửa mã nguồn:
 
 ```powershell
 python .\inventory_bag_monitor.py
