@@ -4,10 +4,18 @@ import threading
 import time
 import tkinter as tk
 import base64
+import sys
+import subprocess
+import urllib.request
+import urllib.error
 from ctypes import wintypes
 from dataclasses import dataclass
 from pathlib import Path
 from tkinter import messagebox, ttk
+
+CURRENT_VERSION = "v1.0.0"
+GITHUB_OWNER = "chinhtran13"
+GITHUB_REPO = "TBH_Tool"
 
 
 CONFIG_PATH = Path(__file__).with_name("inventory_bag_monitor_config.json")
@@ -530,6 +538,10 @@ class App:
         self.build_ui()
         self.load_config()
         self.log("Sẵn sàng. Chọn 2 vùng, điểm click hành động và danh sách vị trí túi.")
+        
+        # Chạy luồng ngầm kiểm tra cập nhật tự động
+        threading.Thread(target=self.check_for_updates, daemon=True).start()
+
 
     def build_ui(self):
         # Scrollable container
@@ -1285,6 +1297,176 @@ class App:
             self.log(f"Đã nạp cấu hình từ {CONFIG_PATH.name}.")
         except Exception:
             self.log("Không thể nạp cấu hình cũ.")
+
+    def check_for_updates(self):
+        """Kiểm tra bản cập nhật mới từ GitHub Releases qua API JSON."""
+        time.sleep(1.0)
+        url = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={"User-Agent": "TBH_Tool-Updater"}
+            )
+            with urllib.request.urlopen(req, timeout=10) as response:
+                data = json.loads(response.read().decode("utf-8"))
+            
+            tag_name = data.get("tag_name", "").strip()
+            if not tag_name:
+                return
+            
+            # So sánh phiên bản hiện tại với tag_name mới nhất
+            if tag_name.lower() != CURRENT_VERSION.lower():
+                # Tìm file update exe trong danh sách assets
+                assets = data.get("assets", [])
+                download_url = None
+                for asset in assets:
+                    name = asset.get("name", "")
+                    if name.endswith(".exe"):
+                        download_url = asset.get("browser_download_url")
+                        break
+                
+                # Nếu không tìm thấy file .exe, lấy asset đầu tiên (nếu có)
+                if not download_url and assets:
+                    download_url = assets[0].get("browser_download_url")
+                
+                if download_url:
+                    # Gửi tín hiệu về luồng chính để hiển thị hộp thoại Tkinter
+                    self.root.after(0, self.prompt_update, tag_name, download_url)
+        except Exception as e:
+            print(f"[Updater] Lỗi kiểm tra cập nhật: {e}")
+
+    def prompt_update(self, new_version, download_url):
+        """Hiển thị hộp thoại Tkinter hỏi người dùng có muốn cập nhật không."""
+        msg = f"Đã tìm thấy phiên bản mới: {new_version}\nPhiên bản hiện tại: {CURRENT_VERSION}\n\nBạn có muốn tải về và tự động cập nhật ngay bây giờ không?"
+        if messagebox.askyesno("Phát hiện phiên bản mới", msg, parent=self.root):
+            self.download_update(download_url, new_version)
+
+    def download_update(self, download_url, new_version):
+        """Hiển thị giao diện tiến trình tải xuống và tiến hành tải file cập nhật."""
+        # Tạo cửa sổ hiển thị tiến trình tải
+        progress_win = tk.Toplevel(self.root)
+        progress_win.title("Đang tải cập nhật...")
+        progress_win.geometry("400x130")
+        progress_win.resizable(False, False)
+        progress_win.transient(self.root)
+        progress_win.grab_set()
+        
+        # Căn giữa cửa sổ con so với cửa sổ chính
+        progress_win.update_idletasks()
+        rx = self.root.winfo_x()
+        ry = self.root.winfo_y()
+        rw = self.root.winfo_width()
+        rh = self.root.winfo_height()
+        w = progress_win.winfo_width()
+        h = progress_win.winfo_height()
+        x = rx + (rw - w) // 2
+        y = ry + (rh - h) // 2
+        progress_win.geometry(f"+{x}+{y}")
+
+        label = ttk.Label(progress_win, text=f"Đang tải bản cập nhật {new_version}...", font=("Segoe UI", 10))
+        label.pack(pady=12, padx=20, anchor="w")
+
+        progress_var = tk.DoubleVar()
+        progress_bar = ttk.Progressbar(progress_win, variable=progress_var, maximum=100)
+        progress_bar.pack(fill="x", padx=20, pady=5)
+
+        status_label = ttk.Label(progress_win, text="Đang kết nối...", font=("Segoe UI", 9))
+        status_label.pack(pady=5, padx=20, anchor="w")
+
+        self.status_var.set("Đang tải bản cập nhật mới...")
+        self.log(f"Bắt đầu tải phiên bản mới {new_version}...")
+
+        def run_download():
+            temp_file = Path(sys.argv[0]).parent / "update_new.exe"
+            try:
+                req = urllib.request.Request(
+                    download_url,
+                    headers={"User-Agent": "TBH_Tool-Updater"}
+                )
+                with urllib.request.urlopen(req, timeout=30) as response:
+                    total_size = int(response.info().get('Content-Length', 0))
+                    downloaded = 0
+                    
+                    with open(temp_file, "wb") as f:
+                        while True:
+                            chunk = response.read(8192)
+                            if not chunk:
+                                break
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            if total_size > 0:
+                                percent = (downloaded / total_size) * 100
+                                progress_var.set(percent)
+                                downloaded_mb = downloaded / (1024 * 1024)
+                                total_mb = total_size / (1024 * 1024)
+                                status_label.config(text=f"Đã tải {downloaded_mb:.2f} MB / {total_mb:.2f} MB ({percent:.1f}%)")
+                            else:
+                                downloaded_mb = downloaded / (1024 * 1024)
+                                status_label.config(text=f"Đã tải {downloaded_mb:.2f} MB")
+                            progress_win.update_idletasks()
+                
+                progress_win.destroy()
+                self.root.after(0, self.apply_update_and_restart, temp_file)
+            except Exception as e:
+                progress_win.destroy()
+                self.status_var.set("Tải bản cập nhật thất bại.")
+                self.log(f"Lỗi tải cập nhật: {e}")
+                messagebox.showerror("Lỗi cập nhật", f"Không thể tải bản cập nhật:\n{e}", parent=self.root)
+                if temp_file.exists():
+                    try:
+                        temp_file.unlink()
+                    except Exception:
+                        pass
+
+        threading.Thread(target=run_download, daemon=True).start()
+
+    def apply_update_and_restart(self, temp_file):
+        """Ghi đè file cũ và tái khởi động ứng dụng (Hot-swap)."""
+        is_frozen = getattr(sys, 'frozen', False)
+        current_exe = Path(sys.executable) if is_frozen else Path(sys.argv[0])
+
+        if not is_frozen:
+            msg = f"Tải xuống thành công file: {temp_file.name}\n\nDo bạn đang chạy mã nguồn Python trực tiếp (.py), hệ thống sẽ KHÔNG tự động ghi đè để bảo vệ mã nguồn của bạn."
+            messagebox.showinfo("Cập nhật thành công (Chế độ phát triển)", msg, parent=self.root)
+            self.status_var.set("Đã tải xong bản cập nhật (Python Mode).")
+            return
+
+        # Viết kịch bản update.bat để ghi đè & khởi động lại exe
+        bat_path = current_exe.parent / "update.bat"
+        try:
+            bat_content = f"""@echo off
+timeout /t 2 /nobreak > NUL
+copy /y "{temp_file}" "{current_exe}" > NUL
+del "{temp_file}" > NUL
+start "" "{current_exe}"
+del "%~f0"
+"""
+            bat_path.write_text(bat_content, encoding="utf-8")
+            
+            # Khởi chạy script bat độc lập không đồng bộ
+            creationflags = 0
+            if hasattr(subprocess, "CREATE_NEW_CONSOLE"):
+                creationflags |= subprocess.CREATE_NEW_CONSOLE
+            if hasattr(subprocess, "DETACHED_PROCESS"):
+                creationflags |= subprocess.DETACHED_PROCESS
+            
+            subprocess.Popen(
+                [str(bat_path)],
+                shell=True,
+                creationflags=creationflags
+            )
+            
+            # Thoát ứng dụng lập tức
+            self.root.destroy()
+            sys.exit(0)
+        except Exception as e:
+            self.log(f"Lỗi thực hiện cập nhật tự động: {e}")
+            messagebox.showerror(
+                "Lỗi cập nhật", 
+                f"Không thể tự động ghi đè file.\nVui lòng tự đổi tên và thay thế bằng file: {temp_file.name}\nChi tiết: {e}",
+                parent=self.root
+            )
+
 
 
 def main():
