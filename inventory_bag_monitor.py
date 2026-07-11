@@ -171,53 +171,6 @@ def diff_ratio(a: bytes, b: bytes):
     return changed_channels / total_channels
 
 
-def bgra_to_ppm_bytes(image_bytes: bytes, width: int, height: int):
-    header = f"P6\n{width} {height}\n255\n".encode("ascii")
-    rgb = bytearray(width * height * 3)
-    target = 0
-    for source in range(0, len(image_bytes), 4):
-        blue = image_bytes[source]
-        green = image_bytes[source + 1]
-        red = image_bytes[source + 2]
-        rgb[target] = red
-        rgb[target + 1] = green
-        rgb[target + 2] = blue
-        target += 3
-    return header + bytes(rgb)
-
-
-def save_bmp(image_bytes: bytes, width: int, height: int, output_path: Path):
-    row_size = width * 4
-    pixel_array_size = row_size * height
-    file_size = 14 + 40 + pixel_array_size
-
-    file_header = bytearray()
-    file_header.extend(b"BM")
-    file_header.extend(file_size.to_bytes(4, "little"))
-    file_header.extend((0).to_bytes(2, "little"))
-    file_header.extend((0).to_bytes(2, "little"))
-    file_header.extend((14 + 40).to_bytes(4, "little"))
-
-    dib_header = bytearray()
-    dib_header.extend((40).to_bytes(4, "little"))
-    dib_header.extend(width.to_bytes(4, "little", signed=True))
-    dib_header.extend(height.to_bytes(4, "little", signed=True))
-    dib_header.extend((1).to_bytes(2, "little"))
-    dib_header.extend((32).to_bytes(2, "little"))
-    dib_header.extend((0).to_bytes(4, "little"))
-    dib_header.extend(pixel_array_size.to_bytes(4, "little"))
-    dib_header.extend((2835).to_bytes(4, "little", signed=True))
-    dib_header.extend((2835).to_bytes(4, "little", signed=True))
-    dib_header.extend((0).to_bytes(4, "little"))
-    dib_header.extend((0).to_bytes(4, "little"))
-
-    flipped = bytearray()
-    for row in range(height - 1, -1, -1):
-        start = row * row_size
-        end = start + row_size
-        flipped.extend(image_bytes[start:end])
-
-    output_path.write_bytes(bytes(file_header) + bytes(dib_header) + bytes(flipped))
 
 
 class RegionSelector(tk.Toplevel):
@@ -502,7 +455,6 @@ class App:
         self.worker = None
         self.condition_baseline = None
         self.bag_full_baseline = None
-        self.preview_images = []
         self.condition_triggered = False
         self.bag_triggered = False
         self.current_bag_index = 0
@@ -632,9 +584,8 @@ class App:
         baseline_section = ttk.LabelFrame(outer, text="Mốc gốc")
         baseline_section.pack(fill="x", pady=4)
         ttk.Button(baseline_section, text="Chụp mốc gốc vùng 1 + vùng 2", command=self.capture_baselines).pack(side="left", padx=6, pady=8)
-        ttk.Button(baseline_section, text="Xem ảnh đã chụp", command=self.preview_regions).pack(side="left", padx=6, pady=8)
-        ttk.Button(baseline_section, text="Lưu ảnh đã chụp", command=self.export_regions).pack(side="left", padx=6, pady=8)
         ttk.Button(baseline_section, text="Hiện/Ẩn vùng đã chọn", command=self.toggle_overlay).pack(side="left", padx=6, pady=8)
+
 
         profile_section = ttk.LabelFrame(outer, text="Cấu hình")
         profile_section.pack(fill="x", pady=4)
@@ -883,48 +834,6 @@ class App:
             ("Vùng 2", bag_rect, bag_image),
         )
 
-    def preview_regions(self):
-        try:
-            regions = self.capture_current_regions()
-        except Exception as exc:
-            messagebox.showerror("Lỗi", str(exc))
-            return
-
-        self.preview_images = []
-        preview = tk.Toplevel(self.root)
-        preview.title("Xem ảnh đã chụp")
-        preview.geometry("900x520")
-
-        container = ttk.Frame(preview, padding=12)
-        container.pack(fill="both", expand=True)
-
-        for index, (title, rect, image_bytes) in enumerate(regions):
-            panel = ttk.LabelFrame(container, text=f"{title} ({rect.width}x{rect.height})")
-            panel.grid(row=0, column=index, padx=6, pady=6, sticky="nsew")
-            ppm_bytes = bgra_to_ppm_bytes(image_bytes, rect.width, rect.height)
-            encoded = base64.b64encode(ppm_bytes).decode("ascii")
-            image = tk.PhotoImage(data=encoded, format="PPM")
-            self.preview_images.append(image)
-            ttk.Label(panel, image=image).pack(padx=6, pady=6)
-
-        container.columnconfigure(0, weight=1)
-        container.columnconfigure(1, weight=1)
-        self.log("Đã mở cửa sổ xem trước ảnh vùng 1 và vùng 2.")
-
-    def export_regions(self):
-        try:
-            regions = self.capture_current_regions()
-            CAPTURE_DIR.mkdir(exist_ok=True)
-            timestamp = time.strftime("%Y%m%d_%H%M%S")
-            saved_files = []
-            for title, rect, image_bytes in regions:
-                safe_name = "vung_1" if title == "Vùng 1" else "vung_2"
-                output_path = CAPTURE_DIR / f"{safe_name}_{timestamp}.bmp"
-                save_bmp(image_bytes, rect.width, rect.height, output_path)
-                saved_files.append(output_path.name)
-            self.log(f"Đã lưu ảnh: {', '.join(saved_files)}.")
-        except Exception as exc:
-            messagebox.showerror("Lỗi", str(exc))
 
     def parse_switch_points(self):
         points = []
