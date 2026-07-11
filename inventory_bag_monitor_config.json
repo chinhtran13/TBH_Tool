@@ -1,0 +1,21 @@
+{
+  "condition_x": "-1112",
+  "condition_y": "519",
+  "condition_w": "47",
+  "condition_h": "49",
+  "bag_x": "-1317",
+  "bag_y": "580",
+  "bag_w": "52",
+  "bag_h": "52",
+  "action_x": "-1418",
+  "action_y": "673",
+  "poll_ms": "700",
+  "condition_threshold": "0.035",
+  "bag_threshold": "0.035",
+  "action_delay_ms": "1200",
+  "switch_delay_ms": "1600",
+  "cleanup_repeat": "5",
+  "cleanup_delay_ms": "2000",
+  "bag_positions": "-1606,238\n-1552,242\n-1495,240\n-1449,246",
+  "cleanup_positions": "-707,523\n-553,524\n-726,459"
+}
