@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from tkinter import messagebox, ttk
 
-CURRENT_VERSION = "v1.0.0"
+CURRENT_VERSION = "v1.0.1"
 GITHUB_OWNER = "chinhtran13"
 GITHUB_REPO = "TBH_Tool"
 
