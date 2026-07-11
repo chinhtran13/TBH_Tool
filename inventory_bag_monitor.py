@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from tkinter import messagebox, ttk
 
-CURRENT_VERSION = "v1.0.2"
+CURRENT_VERSION = "v1.0.1"
 GITHUB_OWNER = "chinhtran13"
 GITHUB_REPO = "TBH_Tool"
 
@@ -1581,38 +1581,58 @@ class App:
             self.status_var.set("Đã tải xong bản cập nhật (Python Mode).")
             return
 
-        # Viết kịch bản update_tbh.bat để ghi đè & khởi động lại exe (lưu ở thư mục tạm)
-        bat_path = Path(tempfile.gettempdir()) / "update_tbh.bat"
+        # Viết kịch bản update_tbh.bat next to the executable to bypass execution policies
+        bat_path = current_exe.parent / "update_tbh.bat"
+        log_path = current_exe.parent / "update_log.txt"
         try:
             bat_content = f"""@echo off
-taskkill /f /im "{current_exe.name}" > NUL 2>&1
+echo [%date% %time%] Batch script started. > "{log_path}"
+echo current_exe: "{current_exe}" >> "{log_path}"
+echo temp_file: "{temp_file}" >> "{log_path}"
+
+:wait_kill
+taskkill /f /im "{current_exe.name}" >> "{log_path}" 2>&1
 timeout /t 1 /nobreak > NUL
-:loop
-copy /y "{temp_file}" "{current_exe}" > NUL
+tasklist /FI "IMAGENAME eq {current_exe.name}" 2>NUL | find /I /N "{current_exe.name}">NUL
+if "%ERRORLEVEL%"=="0" goto wait_kill
+
+:copy_loop
+echo [%date% %time%] Attempting copy... >> "{log_path}"
+copy /y "{temp_file}" "{current_exe}" >> "{log_path}" 2>&1
 if errorlevel 1 (
+    echo [%date% %time%] Copy failed, retrying in 1s... >> "{log_path}"
     timeout /t 1 /nobreak > NUL
-    goto loop
+    goto copy_loop
 )
-del "{temp_file}" > NUL
-start "" "{current_exe}" --updated
+
+echo [%date% %time%] Copy succeeded. Deleting temp file... >> "{log_path}"
+if exist "{temp_file}" del "{temp_file}" >> "{log_path}" 2>&1
+
+echo [%date% %time%] Starting new executable... >> "{log_path}"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$env:_MEIPASS=$null; $env:_MEIPASS2=$null; $env:_PYI_APPLICATION_HOME_DIR=$null; $env:_PYI_ARCHIVE_FILE=$null; $env:PATH=($env:PATH.Split(';') | Where-Object {{ $_ -notlike '*_MEI*' }}) -join ';'; Start-Process -FilePath '{current_exe}' -ArgumentList '--updated'"
+
+del "{log_path}" > NUL 2>&1
 del "%~f0"
 """
             bat_path.write_text(bat_content, encoding="utf-8")
             
-            # Khởi chạy script bat độc lập không đồng bộ
-            creationflags = 0
-            if hasattr(subprocess, "CREATE_NEW_CONSOLE"):
-                creationflags |= subprocess.CREATE_NEW_CONSOLE
-            if hasattr(subprocess, "DETACHED_PROCESS"):
-                creationflags |= subprocess.DETACHED_PROCESS
+            # Dọn sạch các biến môi trường của PyInstaller để tránh xung đột DLL khi khởi chạy app mới
+            import os
+            for key in ["_MEIPASS", "_MEIPASS2", "_PYI_APPLICATION_HOME_DIR", "_PYI_ARCHIVE_FILE"]:
+                if key in os.environ:
+                    del os.environ[key]
+            paths = os.environ.get("PATH", "").split(os.pathsep)
+            paths = [p for p in paths if "_MEI" not in p]
+            os.environ["PATH"] = os.pathsep.join(paths)
+
+            # Khởi chạy script bat độc lập bằng os.startfile để tách biệt hoàn toàn khỏi Job Object của tiến trình cha
+            try:
+                os.startfile(str(bat_path))
+            except Exception:
+                # Fallback nếu hệ thống không hỗ trợ startfile
+                subprocess.Popen([str(bat_path)], shell=True)
             
-            subprocess.Popen(
-                [str(bat_path)],
-                shell=True,
-                creationflags=creationflags
-            )
-            
-            # Thoát ứng dụng lập tức
+            # Thoát ứng dụng lập tức để giải phóng file lock
             self.root.destroy()
             sys.exit(0)
         except Exception as e:
