@@ -1585,6 +1585,8 @@ class App:
         bat_path = Path(tempfile.gettempdir()) / "update_tbh.bat"
         try:
             bat_content = f"""@echo off
+taskkill /f /im "{current_exe.name}" > NUL 2>&1
+timeout /t 1 /nobreak > NUL
 :loop
 copy /y "{temp_file}" "{current_exe}" > NUL
 if errorlevel 1 (
