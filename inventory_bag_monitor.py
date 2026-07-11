@@ -6,6 +6,8 @@ import tkinter as tk
 import base64
 import sys
 import subprocess
+import winreg
+import tempfile
 import urllib.request
 import urllib.error
 from ctypes import wintypes
@@ -13,14 +15,22 @@ from dataclasses import dataclass
 from pathlib import Path
 from tkinter import messagebox, ttk
 
-CURRENT_VERSION = "v1.0.1"
+CURRENT_VERSION = "v1.0.2"
 GITHUB_OWNER = "chinhtran13"
 GITHUB_REPO = "TBH_Tool"
 
 
-CONFIG_PATH = Path(__file__).with_name("inventory_bag_monitor_config.json")
-CAPTURE_DIR = Path(__file__).with_name("captures")
-PROFILES_DIR = Path(__file__).with_name("profiles")
+is_frozen = getattr(sys, 'frozen', False)
+BASE_DIR = Path(sys.executable).parent if is_frozen else Path(__file__).parent
+
+CONFIG_PATH = BASE_DIR / "inventory_bag_monitor_config.json"
+CAPTURE_DIR = BASE_DIR / "captures"
+PROFILES_DIR = BASE_DIR / "profiles"
+
+REG_PATH = r"Software\TBH_Tool"
+REG_PROFILES_PATH = r"Software\TBH_Tool\Profiles"
+
+
 
 SRCCOPY = 0x00CC0020
 BI_RGB = 0
@@ -1122,90 +1132,147 @@ class App:
         self.cleanup_positions_text.insert("1.0", cleanup_positions)
 
     def refresh_profiles(self):
-        """Refresh the profile dropdown list."""
-        PROFILES_DIR.mkdir(exist_ok=True)
-        names = sorted(
-            p.stem for p in PROFILES_DIR.glob("*.json")
-        )
-        self.profile_combo["values"] = names
+        """Enumerate profiles from the Windows Registry."""
+        names = []
+        try:
+            key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, REG_PROFILES_PATH)
+            i = 0
+            while True:
+                try:
+                    name, value, _ = winreg.EnumValue(key, i)
+                    names.append(name)
+                    i += 1
+                except OSError:
+                    break
+            winreg.CloseKey(key)
+        except Exception:
+            pass
+        self.profile_combo["values"] = sorted(names)
 
     def save_config(self):
-        """Save to the currently selected profile (or default)."""
+        """Save to the currently selected profile (or default) in the Windows Registry."""
         name = self.profile_var.get().strip()
-        if not name:
-            # Fallback: save to legacy config
-            data = self.get_config_data()
-            CONFIG_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
-            self.log(f"Đã lưu cấu hình vào {CONFIG_PATH.name}.")
-            return
-        PROFILES_DIR.mkdir(exist_ok=True)
-        path = PROFILES_DIR / f"{name}.json"
         data = self.get_config_data()
-        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        self.log(f"Đã lưu cấu hình '{name}'.")
+        try:
+            if not name:
+                key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, REG_PATH)
+                winreg.SetValueEx(key, "default_config", 0, winreg.REG_SZ, json.dumps(data, indent=2))
+                winreg.CloseKey(key)
+                self.log("Đã lưu cấu hình mặc định vào Registry.")
+            else:
+                key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, REG_PROFILES_PATH)
+                winreg.SetValueEx(key, name, 0, winreg.REG_SZ, json.dumps(data, indent=2))
+                winreg.CloseKey(key)
+                self.log(f"Đã lưu cấu hình '{name}' vào Registry.")
+        except Exception as e:
+            self.log(f"Lỗi lưu cấu hình: {e}")
 
     def save_profile_as(self):
-        """Save current config with a new name."""
+        """Save current config with a new name in Registry."""
         from tkinter import simpledialog
         name = simpledialog.askstring("Lưu cấu hình mới", "Nhập tên cấu hình:", parent=self.root)
         if not name or not name.strip():
             return
         name = name.strip()
-        # Sanitize filename
         safe_name = "".join(c for c in name if c.isalnum() or c in " _-").strip()
         if not safe_name:
             messagebox.showwarning("Lỗi", "Tên cấu hình không hợp lệ.")
             return
-        PROFILES_DIR.mkdir(exist_ok=True)
-        path = PROFILES_DIR / f"{safe_name}.json"
+        
         data = self.get_config_data()
-        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        self.refresh_profiles()
-        self.profile_var.set(safe_name)
-        self.log(f"Đã lưu cấu hình mới '{safe_name}'.")
+        try:
+            key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, REG_PROFILES_PATH)
+            winreg.SetValueEx(key, safe_name, 0, winreg.REG_SZ, json.dumps(data, indent=2))
+            winreg.CloseKey(key)
+            self.refresh_profiles()
+            self.profile_var.set(safe_name)
+            self.log(f"Đã lưu cấu hình mới '{safe_name}' vào Registry.")
+        except Exception as e:
+            self.log(f"Lỗi lưu cấu hình mới: {e}")
 
     def load_profile(self):
-        """Load the selected profile."""
+        """Load the selected profile from Windows Registry."""
         name = self.profile_var.get().strip()
         if not name:
             return
-        path = PROFILES_DIR / f"{name}.json"
-        if not path.exists():
-            messagebox.showwarning("Lỗi", f"Không tìm thấy cấu hình '{name}'.")
-            return
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, REG_PROFILES_PATH)
+            value, _ = winreg.QueryValueEx(key, name)
+            winreg.CloseKey(key)
+            data = json.loads(value)
             self.apply_config_data(data)
-            self.log(f"Đã nạp cấu hình '{name}'.")
-        except Exception:
-            self.log(f"Không thể nạp cấu hình '{name}'.")
+            self.log(f"Đã nạp cấu hình '{name}' từ Registry.")
+        except Exception as e:
+            self.log(f"Không thể nạp cấu hình '{name}': {e}")
+            messagebox.showwarning("Lỗi", f"Không tìm thấy cấu hình '{name}'.")
 
     def delete_profile(self):
-        """Delete the selected profile."""
+        """Delete the selected profile from Windows Registry."""
         name = self.profile_var.get().strip()
         if not name:
             messagebox.showwarning("Thông báo", "Chưa chọn cấu hình nào để xóa.")
             return
-        path = PROFILES_DIR / f"{name}.json"
-        if not path.exists():
-            return
         if not messagebox.askyesno("Xác nhận", f"Xóa cấu hình '{name}'?"):
             return
-        path.unlink()
-        self.profile_var.set("")
-        self.refresh_profiles()
-        self.log(f"Đã xóa cấu hình '{name}'.")
+        try:
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, REG_PROFILES_PATH, 0, winreg.KEY_ALL_ACCESS)
+            winreg.DeleteValue(key, name)
+            winreg.CloseKey(key)
+            self.profile_var.set("")
+            self.refresh_profiles()
+            self.log(f"Đã xóa cấu hình '{name}' khỏi Registry.")
+        except Exception as e:
+            self.log(f"Lỗi xóa cấu hình '{name}': {e}")
 
     def load_config(self):
-        """Load legacy config on startup."""
-        if not CONFIG_PATH.exists():
-            return
+        """Load configuration on startup from Registry, migrating legacy files if they exist."""
+        loaded_from_reg = False
         try:
-            data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, REG_PATH)
+            value, _ = winreg.QueryValueEx(key, "default_config")
+            winreg.CloseKey(key)
+            data = json.loads(value)
             self.apply_config_data(data)
-            self.log(f"Đã nạp cấu hình từ {CONFIG_PATH.name}.")
+            self.log("Đã nạp cấu hình mặc định từ Registry.")
+            loaded_from_reg = True
         except Exception:
-            self.log("Không thể nạp cấu hình cũ.")
+            pass
+
+        if not loaded_from_reg and CONFIG_PATH.exists():
+            try:
+                data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+                self.apply_config_data(data)
+                key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, REG_PATH)
+                winreg.SetValueEx(key, "default_config", 0, winreg.REG_SZ, json.dumps(data, indent=2))
+                winreg.CloseKey(key)
+                self.log("Đã di chuyển cấu hình mặc định cũ vào Registry.")
+                try:
+                    CONFIG_PATH.unlink()
+                except Exception:
+                    pass
+            except Exception:
+                self.log("Không thể di chuyển cấu hình mặc định cũ.")
+
+        if PROFILES_DIR.exists():
+            try:
+                for path in PROFILES_DIR.glob("*.json"):
+                    try:
+                        data = json.loads(path.read_text(encoding="utf-8"))
+                        key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, REG_PROFILES_PATH)
+                        winreg.SetValueEx(key, path.stem, 0, winreg.REG_SZ, json.dumps(data, indent=2))
+                        winreg.CloseKey(key)
+                        try:
+                            path.unlink()
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+                try:
+                    PROFILES_DIR.rmdir()
+                except Exception:
+                    pass
+            except Exception:
+                pass
 
     def check_for_updates(self):
         """Kiểm tra bản cập nhật mới từ GitHub Releases qua API JSON."""
@@ -1245,10 +1312,99 @@ class App:
             print(f"[Updater] Lỗi kiểm tra cập nhật: {e}")
 
     def prompt_update(self, new_version, download_url):
-        """Hiển thị hộp thoại Tkinter hỏi người dùng có muốn cập nhật không."""
-        msg = f"Đã tìm thấy phiên bản mới: {new_version}\nPhiên bản hiện tại: {CURRENT_VERSION}\n\nBạn có muốn tải về và tự động cập nhật ngay bây giờ không?"
-        if messagebox.askyesno("Phát hiện phiên bản mới", msg, parent=self.root):
-            self.download_update(download_url, new_version)
+        """Hiển thị thông báo cập nhật dạng popup không chặn ở góc phải màn hình."""
+        toast = tk.Toplevel(self.root)
+        toast.withdraw()  # Ẩn đi để tính toán vị trí tránh nhấp nháy
+        toast.overrideredirect(True)  # Không có viền cửa sổ chuẩn
+        toast.attributes("-topmost", True)
+        toast.configure(bg="#2d3748")  # Màu nền tối hiện đại
+
+        # Giao diện thông báo
+        frame = tk.Frame(toast, bg="#2d3748", bd=1, relief="solid", highlightthickness=0)
+        frame.pack(fill="both", expand=True)
+
+        # Tiêu đề
+        title_label = tk.Label(
+            frame, 
+            text="🚀 Có bản cập nhật mới!", 
+            fg="#4fd1c5",  # Teal color
+            bg="#2d3748", 
+            font=("Segoe UI", 10, "bold")
+        )
+        title_label.pack(pady=(10, 2), padx=15, anchor="w")
+
+        # Nội dung chi tiết
+        desc_label = tk.Label(
+            frame, 
+            text=f"Phiên bản {new_version} đã sẵn sàng.\nClick vào đây để cài đặt tự động.", 
+            fg="#e2e8f0", 
+            bg="#2d3748", 
+            font=("Segoe UI", 9),
+            justify="left"
+        )
+        desc_label.pack(pady=(0, 10), padx=15, anchor="w")
+
+        # Nút đóng nhỏ ở góc
+        close_btn = tk.Label(
+            frame, 
+            text="✕", 
+            fg="#a0aec0", 
+            bg="#2d3748", 
+            font=("Segoe UI", 9, "bold"),
+            cursor="hand2"
+        )
+        close_btn.place(x=278, y=4)
+        
+        # Đổi màu nút đóng khi di chuột vào
+        close_btn.bind("<Enter>", lambda _: close_btn.config(fg="#fc8181"))
+        close_btn.bind("<Leave>", lambda _: close_btn.config(fg="#a0aec0"))
+        close_btn.bind("<Button-1>", lambda _: toast.destroy())
+
+        # Hiệu ứng đổi màu nền khi hover vào vùng thông báo để click
+        def on_enter(e):
+            frame.config(bg="#3a4a5e")
+            title_label.config(bg="#3a4a5e")
+            desc_label.config(bg="#3a4a5e")
+            close_btn.config(bg="#3a4a5e")
+
+        def on_leave(e):
+            frame.config(bg="#2d3748")
+            title_label.config(bg="#2d3748")
+            desc_label.config(bg="#2d3748")
+            close_btn.config(bg="#2d3748")
+
+        for widget in (frame, title_label, desc_label):
+            widget.bind("<Enter>", on_enter)
+            widget.bind("<Leave>", on_leave)
+
+        # Sự kiện khi nhấp chuột để bắt đầu tải cập nhật
+        def on_click(event):
+            toast.destroy()
+            if messagebox.askyesno("Xác nhận cập nhật", f"Bạn có muốn tải xuống và cài đặt tự động phiên bản {new_version} không?", parent=self.root):
+                self.download_update(download_url, new_version)
+
+        frame.bind("<Button-1>", on_click)
+        title_label.bind("<Button-1>", on_click)
+        desc_label.bind("<Button-1>", on_click)
+
+        # Tính toán vị trí ở góc dưới bên phải màn hình chính
+        toast.update_idletasks()
+        width = 300
+        height = 75
+        
+        screen_w = self.root.winfo_screenwidth()
+        screen_h = self.root.winfo_screenheight()
+        
+        # Đặt cách lề phải 20px, lề dưới 60px (để tránh che taskbar)
+        x = screen_w - width - 20
+        y = screen_h - height - 60
+        
+        toast.geometry(f"{width}x{height}+{x}+{y}")
+        toast.deiconify()
+
+        # Tự động tắt thông báo sau 15 giây nếu không tương tác
+        self.root.after(15000, lambda: toast.destroy() if toast.winfo_exists() else None)
+
 
     def download_update(self, download_url, new_version):
         """Hiển thị giao diện tiến trình tải xuống và tiến hành tải file cập nhật."""
@@ -1286,7 +1442,7 @@ class App:
         self.log(f"Bắt đầu tải phiên bản mới {new_version}...")
 
         def run_download():
-            temp_file = Path(sys.argv[0]).parent / "update_new.exe"
+            temp_file = Path(tempfile.gettempdir()) / "update_new_tbh.exe"
             try:
                 req = urllib.request.Request(
                     download_url,
@@ -1340,12 +1496,16 @@ class App:
             self.status_var.set("Đã tải xong bản cập nhật (Python Mode).")
             return
 
-        # Viết kịch bản update.bat để ghi đè & khởi động lại exe
-        bat_path = current_exe.parent / "update.bat"
+        # Viết kịch bản update_tbh.bat để ghi đè & khởi động lại exe (lưu ở thư mục tạm)
+        bat_path = Path(tempfile.gettempdir()) / "update_tbh.bat"
         try:
             bat_content = f"""@echo off
-timeout /t 2 /nobreak > NUL
+:loop
 copy /y "{temp_file}" "{current_exe}" > NUL
+if errorlevel 1 (
+    timeout /t 1 /nobreak > NUL
+    goto loop
+)
 del "{temp_file}" > NUL
 start "" "{current_exe}"
 del "%~f0"
