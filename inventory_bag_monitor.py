@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from tkinter import messagebox, ttk
 
-CURRENT_VERSION = "v1.0.2"
+CURRENT_VERSION = "v1.0.3"
 GITHUB_OWNER = "chinhtran13"
 GITHUB_REPO = "TBH_Tool"
 
@@ -1049,17 +1049,7 @@ class App:
                 condition_ratio = diff_ratio(self.condition_baseline, condition_image)
                 bag_ratio = diff_ratio(self.bag_full_baseline, bag_image)
 
-                if condition_ratio >= condition_threshold:
-                    if not self.condition_triggered:
-                        self.safe_log(f"Vùng 1 thay đổi ({condition_ratio:.3f}). Click hành động.")
-                        left_click(*action_point)
-                        self.condition_triggered = True
-                        time.sleep(action_delay)
-                        bag_image = capture_region(self.get_rect("bag"))
-                        bag_ratio = diff_ratio(self.bag_full_baseline, bag_image)
-                else:
-                    self.condition_triggered = False
-
+                # 1. Ưu tiên kiểm tra túi đầy trước -> Nếu đầy lập tức chuyển sang túi tiếp theo hoặc dọn kho
                 if bag_ratio >= bag_threshold:
                     if self.current_bag_index >= len(self.switch_points):
                         # All bags used up — verify region 1 then cleanup
@@ -1075,8 +1065,6 @@ class App:
                                 self.run_cleanup_sequence(cleanup_repeat, cleanup_delay)
                                 # Reset and restart monitoring with ORIGINAL baselines
                                 self.current_bag_index = 0
-                                self.condition_triggered = False
-                                self.bag_triggered = False
                                 self.condition_baseline = self.original_condition_baseline
                                 self.bag_full_baseline = self.original_bag_baseline
                                 self.safe_log("Dọn kho xong. Đã reset về mốc gốc ban đầu và tiếp tục giám sát.")
@@ -1090,7 +1078,7 @@ class App:
                                 f"Vùng 1 đã trở lại bình thường ({recheck_ratio:.3f}). Tiếp tục giám sát."
                             )
                             continue
-                    elif not self.bag_triggered:
+                    else:
                         # Switch to next bag, then verify it's not already full
                         while self.current_bag_index < len(self.switch_points):
                             point = self.switch_points[self.current_bag_index]
@@ -1109,24 +1097,23 @@ class App:
                             verify_bag = capture_region(self.get_rect("bag"))
                             verify_bag_ratio = diff_ratio(self.original_bag_baseline, verify_bag)
                             if verify_bag_ratio >= bag_threshold:
-                                # New bag looks different from original empty state → already full
                                 self.safe_log(
                                     f"Túi {target_bag_number} đã đầy sẵn (ratio={verify_bag_ratio:.3f} so với mốc gốc). Bỏ qua."
                                 )
-                                continue  # try next bag in while loop
+                                continue
                             else:
-                                # New bag looks similar to original → empty, good!
                                 self.safe_log(
                                     f"Túi {target_bag_number} còn trống (ratio={verify_bag_ratio:.3f}). Tiếp tục giám sát."
                                 )
-                                # Restore original baseline for monitoring this bag
                                 self.bag_full_baseline = self.original_bag_baseline
                                 break
-                        self.bag_triggered = True
-                        self.condition_triggered = False
                         continue
-                else:
-                    self.bag_triggered = False
+
+                # 2. Khi túi hiện tại chưa đầy và Vùng 1 có đồ -> Click hành động thu thập
+                if condition_ratio >= condition_threshold:
+                    self.safe_log(f"Vùng 1 thay đổi ({condition_ratio:.3f}). Click hành động.")
+                    left_click(*action_point)
+                    time.sleep(action_delay)
 
                 time.sleep(poll_ms / 1000)
             except Exception as exc:
